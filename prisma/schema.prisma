@@ -1,0 +1,372 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// Super Admin Models
+model SuperAdmin {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  name      String
+  password  String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("super_admins")
+}
+
+// Institution Models
+model Institution {
+  id          String   @id @default(cuid())
+  name        String
+  domain      String   @unique // Custom subdomain
+  logo        String?
+  primaryColor String  @default("#0ea5e9")
+  secondaryColor String @default("#0369a1")
+  address     String?
+  phone       String?
+  email       String?
+  website     String?
+  isActive    Boolean  @default(true)
+  
+  // Subscription
+  subscriptionPlan SubscriptionPlan @default(BASIC)
+  subscriptionEndsAt DateTime?
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  users       User[]
+  courses     Course[]
+  announcements Announcement[]
+  feeStructures FeeStructure[]
+  payments    Payment[]
+
+  @@map("institutions")
+}
+
+enum SubscriptionPlan {
+  BASIC
+  PRO
+  ENTERPRISE
+}
+
+// User Management
+model User {
+  id            String   @id @default(cuid())
+  email         String   @unique
+  name          String
+  avatar        String?
+  phone         String?
+  address       String?
+  dateOfBirth   DateTime?
+  gender        Gender?
+  
+  role          UserRole
+  isActive      Boolean  @default(true)
+  
+  // Institution relation
+  institutionId String
+  institution   Institution @relation(fields: [institutionId], references: [id], onDelete: Cascade)
+  
+  // Student specific fields
+  studentId     String?  @unique
+  semester      Int?
+  batch         String?
+  
+  // Faculty specific fields
+  employeeId    String?  @unique
+  department    String?
+  designation   String?
+  
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  // Relations
+  enrollments   Enrollment[]
+  teachingCourses Course[] @relation("CourseInstructor")
+  attendanceRecords AttendanceRecord[]
+  grades        Grade[]
+  payments      Payment[]
+  sentNotifications Notification[] @relation("SentBy")
+  receivedNotifications Notification[] @relation("ReceivedBy")
+
+  @@map("users")
+}
+
+enum UserRole {
+  INSTITUTION_ADMIN
+  FACULTY
+  STUDENT
+}
+
+enum Gender {
+  MALE
+  FEMALE
+  OTHER
+}
+
+// Academic Management
+model Course {
+  id            String   @id @default(cuid())
+  code          String
+  name          String
+  description   String?
+  credits       Int      @default(3)
+  semester      Int
+  department    String
+  
+  // Institution relation
+  institutionId String
+  institution   Institution @relation(fields: [institutionId], references: [id], onDelete: Cascade)
+  
+  // Instructor relation
+  instructorId  String?
+  instructor    User?    @relation("CourseInstructor", fields: [instructorId], references: [id])
+  
+  // Academic year
+  academicYear  String
+  isActive      Boolean  @default(true)
+  
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  // Relations
+  enrollments   Enrollment[]
+  attendanceRecords AttendanceRecord[]
+  grades        Grade[]
+  materials     CourseMaterial[]
+
+  @@unique([code, institutionId, academicYear])
+  @@map("courses")
+}
+
+model Enrollment {
+  id        String   @id @default(cuid())
+  
+  studentId String
+  student   User     @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  
+  courseId  String
+  course    Course   @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  
+  enrolledAt DateTime @default(now())
+  status     EnrollmentStatus @default(ACTIVE)
+
+  @@unique([studentId, courseId])
+  @@map("enrollments")
+}
+
+enum EnrollmentStatus {
+  ACTIVE
+  COMPLETED
+  DROPPED
+}
+
+// Attendance Management
+model AttendanceRecord {
+  id        String   @id @default(cuid())
+  date      DateTime @db.Date
+  status    AttendanceStatus
+  
+  studentId String
+  student   User     @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  
+  courseId  String
+  course    Course   @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  
+  markedAt  DateTime @default(now())
+  markedBy  String?
+
+  @@unique([studentId, courseId, date])
+  @@map("attendance_records")
+}
+
+enum AttendanceStatus {
+  PRESENT
+  ABSENT
+  LATE
+  EXCUSED
+}
+
+// Grade Management
+model Grade {
+  id          String   @id @default(cuid())
+  examType    ExamType
+  marksObtained Float
+  totalMarks  Float
+  grade       String?
+  
+  studentId   String
+  student     User     @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  
+  courseId    String
+  course      Course   @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  
+  examDate    DateTime @db.Date
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@map("grades")
+}
+
+enum ExamType {
+  QUIZ
+  ASSIGNMENT
+  MIDTERM
+  FINAL
+  PROJECT
+}
+
+// Course Materials
+model CourseMaterial {
+  id          String   @id @default(cuid())
+  title       String
+  description String?
+  fileUrl     String?
+  materialType MaterialType
+  
+  courseId    String
+  course      Course   @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  
+  uploadedAt  DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@map("course_materials")
+}
+
+enum MaterialType {
+  SYLLABUS
+  LECTURE_NOTES
+  ASSIGNMENT
+  READING_MATERIAL
+  VIDEO
+  OTHER
+}
+
+// Fee Management
+model FeeStructure {
+  id            String   @id @default(cuid())
+  name          String
+  amount        Float
+  dueDate       DateTime @db.Date
+  description   String?
+  isRecurring   Boolean  @default(false)
+  
+  // For specific batches/semesters
+  semester      Int?
+  batch         String?
+  
+  institutionId String
+  institution   Institution @relation(fields: [institutionId], references: [id], onDelete: Cascade)
+  
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  // Relations
+  payments      Payment[]
+
+  @@map("fee_structures")
+}
+
+model Payment {
+  id              String   @id @default(cuid())
+  amount          Float
+  paymentMethod   PaymentMethod
+  status          PaymentStatus @default(PENDING)
+  transactionId   String?  @unique
+  
+  studentId       String
+  student         User     @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  
+  feeStructureId  String
+  feeStructure    FeeStructure @relation(fields: [feeStructureId], references: [id], onDelete: Cascade)
+  
+  institutionId   String
+  institution     Institution @relation(fields: [institutionId], references: [id], onDelete: Cascade)
+  
+  paidAt          DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@map("payments")
+}
+
+enum PaymentMethod {
+  CASH
+  CARD
+  BANK_TRANSFER
+  ONLINE
+  UPI
+}
+
+enum PaymentStatus {
+  PENDING
+  COMPLETED
+  FAILED
+  REFUNDED
+}
+
+// Communication
+model Announcement {
+  id            String   @id @default(cuid())
+  title         String
+  content       String
+  isUrgent      Boolean  @default(false)
+  targetAudience AudienceType[]
+  
+  // Optional filters
+  semester      Int?
+  batch         String?
+  department    String?
+  
+  institutionId String
+  institution   Institution @relation(fields: [institutionId], references: [id], onDelete: Cascade)
+  
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@map("announcements")
+}
+
+enum AudienceType {
+  ALL
+  STUDENTS
+  FACULTY
+  ADMINS
+}
+
+model Notification {
+  id        String   @id @default(cuid())
+  title     String
+  message   String
+  type      NotificationType
+  isRead    Boolean  @default(false)
+  
+  sentById  String
+  sentBy    User     @relation("SentBy", fields: [sentById], references: [id], onDelete: Cascade)
+  
+  userId    String
+  user      User     @relation("ReceivedBy", fields: [userId], references: [id], onDelete: Cascade)
+  
+  createdAt DateTime @default(now())
+
+  @@map("notifications")
+}
+
+enum NotificationType {
+  ANNOUNCEMENT
+  GRADE_UPDATED
+  ATTENDANCE_MARKED
+  FEE_DUE
+  ASSIGNMENT_DUE
+  GENERAL
+}
