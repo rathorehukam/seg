@@ -1,0 +1,843 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id            String    @id @default(cuid())
+  phone         String    @unique
+  email         String?   @unique
+  name          String?
+  role          Role      @default(CUSTOMER)
+  isActive      Boolean   @default(true)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  // Relations
+  kyc           KYC?
+  bookings      Booking[]
+  wallet        Wallet?
+  subscription  Subscription?
+  loyaltyLedger LoyaltyLedger[]
+  referralsGiven Referral[] @relation("Referrer")
+  referralsReceived Referral[] @relation("Referee")
+  reviews       Review[]
+  fraudFlags    FraudFlag[]
+  sosEvents     SOSEvent[]
+  auditLogs     AuditLog[]
+  verifiedKYCs  KYC[] @relation("KYCVerifier")
+  deviceCommands DeviceCommand[]
+  
+  // Host specific
+  hostedVehicles Vehicle[] @relation("HostVehicles")
+
+  @@map("users")
+}
+
+enum Role {
+  CUSTOMER
+  STAFF
+  ADMIN
+  HOST
+}
+
+model Location {
+  id       String  @id @default(cuid())
+  name     String
+  address  String
+  lat      Float
+  lng      Float
+
+  // Relations
+  vehiclesPickup Vehicle[] @relation("VehiclePickupLocation")
+  vehiclesDrop   Vehicle[] @relation("VehicleDropLocation")
+  bookingsPickup Booking[] @relation("BookingPickupLocation")
+  bookingsDrop   Booking[] @relation("BookingDropLocation")
+
+  @@map("locations")
+}
+
+enum VehicleOwnerRole {
+  FLEET
+  HOST
+}
+
+enum VehicleType {
+  SCOOTER
+  BIKE
+  CAR
+  SUV
+}
+
+enum VehicleStatus {
+  AVAILABLE
+  BOOKED
+  IN_SERVICE
+  BLOCKED
+}
+
+enum FuelPolicy {
+  FULL_TO_FULL
+  AS_IS
+}
+
+model Vehicle {
+  id                String            @id @default(cuid())
+  ownerRole         VehicleOwnerRole
+  hostId            String?
+  plateNo           String            @unique
+  make              String
+  model             String
+  year              Int
+  type              VehicleType
+  color             String
+  seats             Int
+  rcNo              String
+  insuranceNo       String
+  insuranceExpiry   DateTime
+  pucExpiry         DateTime
+  fuelPolicy        FuelPolicy
+  kmLimitDay        Int
+  baseDailyRate     Int
+  baseHourlyRate    Int
+  deposit           Int
+  photos            String[]
+  status            VehicleStatus     @default(AVAILABLE)
+  pickupLocId       String
+  dropLocId         String
+  description       String?
+  features          Json?
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+
+  // Relations
+  host              User?             @relation("HostVehicles", fields: [hostId], references: [id])
+  pickupLoc         Location          @relation("VehiclePickupLocation", fields: [pickupLocId], references: [id])
+  dropLoc           Location          @relation("VehicleDropLocation", fields: [dropLocId], references: [id])
+  devices           VehicleDevice[]
+  bookings          Booking[]
+  calendarBlocks    VehicleCalendarBlock[]
+  trips             Trip[]
+  telematicsEvents  TelematicsEvent[]
+  fastagAccount     FASTagAccount?
+  trafficFines      TrafficFine[]
+  reviews           Review[]
+  deviceCommands    DeviceCommand[]
+
+  @@index([status])
+  @@index([type])
+  @@index([pickupLocId])
+  @@map("vehicles")
+}
+
+enum DeviceType {
+  BLE
+  OBD
+}
+
+enum DeviceStatus {
+  ACTIVE
+  INACTIVE
+}
+
+model VehicleDevice {
+  id          String        @id @default(cuid())
+  vehicleId   String
+  type        DeviceType
+  imei        String
+  serial      String
+  status      DeviceStatus  @default(ACTIVE)
+  batteryPct  Int?
+  signal      Int?
+  lastSeenAt  DateTime?
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  // Relations
+  vehicle     Vehicle       @relation(fields: [vehicleId], references: [id])
+
+  @@unique([vehicleId, type])
+  @@map("vehicle_devices")
+}
+
+enum DeviceCommandType {
+  LOCK
+  UNLOCK
+  IMMOBILIZE
+  HORN
+  FLASH
+}
+
+enum DeviceCommandStatus {
+  QUEUED
+  SENT
+  ACK
+  FAILED
+}
+
+model DeviceCommand {
+  id            String              @id @default(cuid())
+  vehicleId     String
+  cmd           DeviceCommandType
+  requestedById String
+  status        DeviceCommandStatus @default(QUEUED)
+  resp          String?
+  ts            DateTime            @default(now())
+
+  // Relations
+  vehicle       Vehicle             @relation(fields: [vehicleId], references: [id])
+  requestedBy   User                @relation(fields: [requestedById], references: [id])
+
+  @@map("device_commands")
+}
+
+enum CalendarBlockReason {
+  SERVICE
+  ACCIDENT
+  MANUAL
+}
+
+model VehicleCalendarBlock {
+  id        String              @id @default(cuid())
+  vehicleId String
+  startTs   DateTime
+  endTs     DateTime
+  reason    CalendarBlockReason
+  notes     String?
+  createdAt DateTime            @default(now())
+
+  // Relations
+  vehicle   Vehicle             @relation(fields: [vehicleId], references: [id])
+
+  @@map("vehicle_calendar_blocks")
+}
+
+enum PricingRuleScope {
+  GLOBAL
+  VEHICLE_TYPE
+  VEHICLE
+  CITY
+}
+
+enum PricingRuleType {
+  WEEKEND
+  HOLIDAY
+  SEASON
+  DEMAND
+}
+
+model PricingRule {
+  id         String            @id @default(cuid())
+  scope      PricingRuleScope
+  scopeRef   String?
+  ruleType   PricingRuleType
+  pattern    String
+  multiplier Float?
+  delta      Int?
+  createdAt  DateTime          @default(now())
+  updatedAt  DateTime          @updatedAt
+
+  @@map("pricing_rules")
+}
+
+enum CouponType {
+  PCT
+  FLAT
+}
+
+model Coupon {
+  id        String      @id @default(cuid())
+  code      String      @unique
+  type      CouponType
+  value     Int
+  maxUses   Int
+  validFrom DateTime
+  validTo   DateTime
+  terms     String?
+  isActive  Boolean     @default(true)
+  createdAt DateTime    @default(now())
+  updatedAt DateTime    @updatedAt
+
+  @@map("coupons")
+}
+
+model Plan {
+  id             String        @id @default(cuid())
+  name           String
+  durationDays   Int
+  price          Int
+  vehicleType    VehicleType
+  freeKmPerDay   Int
+  depositPolicy  Json?
+  benefits       String?
+  isActive       Boolean       @default(true)
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  // Relations
+  subscriptions  Subscription[]
+
+  @@map("plans")
+}
+
+enum SubscriptionStatus {
+  ACTIVE
+  PAUSED
+  CANCELLED
+}
+
+model Subscription {
+  id        String             @id @default(cuid())
+  userId    String             @unique
+  planId    String
+  startDate DateTime
+  endDate   DateTime
+  status    SubscriptionStatus @default(ACTIVE)
+  createdAt DateTime           @default(now())
+  updatedAt DateTime           @updatedAt
+
+  // Relations
+  user      User               @relation(fields: [userId], references: [id])
+  plan      Plan               @relation(fields: [planId], references: [id])
+
+  @@map("subscriptions")
+}
+
+enum BookingStatus {
+  HOLD
+  CONFIRMED
+  IN_USE
+  COMPLETED
+  CANCELLED
+  NO_SHOW
+}
+
+enum PaymentStatus {
+  UNPAID
+  PARTIAL
+  PAID
+  REFUNDED
+}
+
+model Booking {
+  id              String        @id @default(cuid())
+  bookingNo       String        @unique
+  userId          String
+  vehicleId       String
+  startTs         DateTime
+  endTs           DateTime
+  pickupLocId     String
+  dropLocId       String
+  status          BookingStatus @default(HOLD)
+  priceBreakdown  Json
+  depositAmount   Int
+  paymentStatus   PaymentStatus @default(UNPAID)
+  isSelfPickup    Boolean       @default(true)
+  valetRequired   Boolean       @default(false)
+  notes           String?
+  legalPdfUrl     String?
+  legalVersion    String?
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  // Relations
+  user            User          @relation(fields: [userId], references: [id])
+  vehicle         Vehicle       @relation(fields: [vehicleId], references: [id])
+  pickupLoc       Location      @relation("BookingPickupLocation", fields: [pickupLocId], references: [id])
+  dropLoc         Location      @relation("BookingDropLocation", fields: [dropLocId], references: [id])
+  addons          BookingAddon[]
+  handoverCheck   HandoverCheck?
+  returnCheck     ReturnCheck?
+  trips           Trip[]
+  trafficFines    TrafficFine[]
+  valetJobs       ValetJob[]
+  rsaCases        RSACase[]
+  reviews         Review[]
+  fraudFlags      FraudFlag[]
+  payments        Payment[]
+
+  @@index([status])
+  @@index([startTs])
+  @@index([vehicleId])
+  @@map("bookings")
+}
+
+model BookingAddon {
+  id        String  @id @default(cuid())
+  bookingId String
+  addonCode String
+  name      String
+  qty       Int
+  unitPrice Int
+
+  // Relations
+  booking   Booking @relation(fields: [bookingId], references: [id])
+
+  @@map("booking_addons")
+}
+
+enum FuelLevel {
+  E
+  F
+  QUARTER
+  HALF
+  THREE_QUARTER
+}
+
+model HandoverCheck {
+  id               String    @id @default(cuid())
+  bookingId        String    @unique
+  odometerOut      Int
+  fuelOut          FuelLevel
+  exteriorPhotos   String[]
+  notes            String?
+  signedByUserAt   DateTime?
+  signedByStaffAt  DateTime?
+  keyless          Boolean   @default(false)
+  createdAt        DateTime  @default(now())
+
+  // Relations
+  booking          Booking   @relation(fields: [bookingId], references: [id])
+
+  @@map("handover_checks")
+}
+
+model ReturnCheck {
+  id               String    @id @default(cuid())
+  bookingId        String    @unique
+  odometerIn       Int
+  fuelIn           FuelLevel
+  exteriorPhotos   String[]
+  newDamageNotes   String?
+  extraKm          Int       @default(0)
+  extraFuelCharge  Int       @default(0)
+  damageCharge     Int       @default(0)
+  lateFee          Int       @default(0)
+  cleaningFee      Int       @default(0)
+  finalizedAt      DateTime?
+  createdAt        DateTime  @default(now())
+
+  // Relations
+  booking          Booking   @relation(fields: [bookingId], references: [id])
+
+  @@map("return_checks")
+}
+
+model Trip {
+  id          String    @id @default(cuid())
+  bookingId   String
+  vehicleId   String
+  startedAt   DateTime
+  endedAt     DateTime?
+  startGeo    String?   // JSON string for geo coordinates
+  endGeo      String?   // JSON string for geo coordinates
+  distanceKm  Float?
+  avgSpeed    Float?
+  maxSpeed    Float?
+  violations  Json?
+  createdAt   DateTime  @default(now())
+
+  // Relations
+  booking     Booking   @relation(fields: [bookingId], references: [id])
+  vehicle     Vehicle   @relation(fields: [vehicleId], references: [id])
+  telematicsEvents TelematicsEvent[]
+  tollCharges TollCharge[]
+
+  @@map("trips")
+}
+
+enum TelematicsEventType {
+  NORMAL
+  HARSH_BRAKE
+  OVERSPEED
+  GEOFENCE
+  IDLE
+}
+
+model TelematicsEvent {
+  id        String               @id @default(cuid())
+  vehicleId String
+  tripId    String?
+  ts        DateTime
+  lat       Float
+  lng       Float
+  speed     Float
+  event     TelematicsEventType  @default(NORMAL)
+  metaJson  Json?
+
+  // Relations
+  vehicle   Vehicle              @relation(fields: [vehicleId], references: [id])
+  trip      Trip?                @relation(fields: [tripId], references: [id])
+
+  @@index([vehicleId, ts])
+  @@map("telematics_events")
+}
+
+enum FASTagStatus {
+  ACTIVE
+  SUSPENDED
+}
+
+model FASTagAccount {
+  id        String      @id @default(cuid())
+  vehicleId String      @unique
+  tagId     String
+  provider  String
+  balance   Int
+  status    FASTagStatus @default(ACTIVE)
+  createdAt DateTime    @default(now())
+  updatedAt DateTime    @updatedAt
+
+  // Relations
+  vehicle   Vehicle     @relation(fields: [vehicleId], references: [id])
+  tollCharges TollCharge[]
+
+  @@map("fastag_accounts")
+}
+
+model TollCharge {
+  id        String        @id @default(cuid())
+  tripId    String
+  fastagId  String
+  plaza     String
+  ts        DateTime
+  amount    Int
+  refNo     String
+
+  // Relations
+  trip      Trip          @relation(fields: [tripId], references: [id])
+  fastag    FASTagAccount @relation(fields: [fastagId], references: [id])
+
+  @@map("toll_charges")
+}
+
+enum TrafficFineStatus {
+  PENDING
+  PAID
+  DISPUTED
+}
+
+model TrafficFine {
+  id        String            @id @default(cuid())
+  bookingId String?
+  vehicleId String
+  challanNo String
+  authority String
+  ts        DateTime
+  amount    Int
+  status    TrafficFineStatus @default(PENDING)
+  doc       String?
+  createdAt DateTime          @default(now())
+
+  // Relations
+  booking   Booking?          @relation(fields: [bookingId], references: [id])
+  vehicle   Vehicle           @relation(fields: [vehicleId], references: [id])
+
+  @@map("traffic_fines")
+}
+
+enum KYCStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum IdDocType {
+  AADHAAR
+  PASSPORT
+  OTHER
+}
+
+model KYC {
+  id              String     @id @default(cuid())
+  userId          String     @unique
+  dlNumber        String
+  dlExpiry        DateTime
+  idDocType       IdDocType
+  idDocNo         String
+  dlFront         String
+  dlBack          String
+  idDoc           String
+  selfie          String
+  livenessScore   Float?
+  duplicateDlFlag Boolean?   @default(false)
+  riskScore       Int?
+  status          KYCStatus  @default(PENDING)
+  verifiedById    String?
+  verifiedAt      DateTime?
+  createdAt       DateTime   @default(now())
+  updatedAt       DateTime   @updatedAt
+
+  // Relations
+  user            User       @relation(fields: [userId], references: [id])
+  verifiedBy      User?      @relation("KYCVerifier", fields: [verifiedById], references: [id])
+
+  @@map("kyc")
+}
+
+model Wallet {
+  id        String       @id @default(cuid())
+  userId    String       @unique
+  balance   Int          @default(0)
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
+
+  // Relations
+  user      User         @relation(fields: [userId], references: [id])
+  txns      WalletTxn[]
+
+  @@map("wallets")
+}
+
+enum WalletTxnType {
+  CREDIT
+  DEBIT
+  REFUND
+}
+
+model WalletTxn {
+  id       String        @id @default(cuid())
+  walletId String
+  type     WalletTxnType
+  amount   Int
+  reason   String
+  ref      String?
+  ts       DateTime      @default(now())
+
+  // Relations
+  wallet   Wallet        @relation(fields: [walletId], references: [id])
+
+  @@map("wallet_txns")
+}
+
+model LoyaltyTier {
+  id        String   @id @default(cuid())
+  name      String
+  minPoints Int
+  perks     Json?
+  createdAt DateTime @default(now())
+
+  @@map("loyalty_tiers")
+}
+
+model LoyaltyLedger {
+  id     String   @id @default(cuid())
+  userId String
+  points Int
+  reason String
+  ref    String?
+  ts     DateTime @default(now())
+
+  // Relations
+  user   User     @relation(fields: [userId], references: [id])
+
+  @@map("loyalty_ledger")
+}
+
+enum ReferralStatus {
+  CREATED
+  COMPLETED
+  EXPIRED
+}
+
+model Referral {
+  id           String        @id @default(cuid())
+  referrerId   String
+  refereeId    String?
+  code         String        @unique
+  status       ReferralStatus @default(CREATED)
+  rewardPoints Int           @default(0)
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+
+  // Relations
+  referrer     User          @relation("Referrer", fields: [referrerId], references: [id])
+  referee      User?         @relation("Referee", fields: [refereeId], references: [id])
+
+  @@map("referrals")
+}
+
+enum ValetJobType {
+  DELIVERY
+  PICKUP
+}
+
+enum ValetJobStatus {
+  SCHEDULED
+  ONGOING
+  COMPLETED
+  CANCELLED
+}
+
+model ValetJob {
+  id        String         @id @default(cuid())
+  bookingId String
+  type      ValetJobType
+  slotTs    DateTime
+  address   String
+  status    ValetJobStatus @default(SCHEDULED)
+  fee       Int
+  createdAt DateTime       @default(now())
+  updatedAt DateTime       @updatedAt
+
+  // Relations
+  booking   Booking        @relation(fields: [bookingId], references: [id])
+
+  @@map("valet_jobs")
+}
+
+enum RSACaseType {
+  BREAKDOWN
+  ACCIDENT
+  OTHER
+}
+
+enum RSACaseStatus {
+  OPEN
+  IN_PROGRESS
+  CLOSED
+}
+
+model RSACase {
+  id        String        @id @default(cuid())
+  bookingId String
+  openedAt  DateTime      @default(now())
+  closedAt  DateTime?
+  type      RSACaseType
+  provider  String
+  status    RSACaseStatus @default(OPEN)
+  notes     String?
+
+  // Relations
+  booking   Booking       @relation(fields: [bookingId], references: [id])
+
+  @@map("rsa_cases")
+}
+
+model SOSEvent {
+  id         String    @id @default(cuid())
+  userId     String
+  bookingId  String?
+  lat        Float
+  lng        Float
+  ts         DateTime  @default(now())
+  resolvedAt DateTime?
+  notes      String?
+
+  // Relations
+  user       User      @relation(fields: [userId], references: [id])
+
+  @@map("sos_events")
+}
+
+model Review {
+  id        String   @id @default(cuid())
+  bookingId String
+  vehicleId String
+  userId    String
+  rating    Int
+  comment   String?
+  tags      Json?
+  createdAt DateTime @default(now())
+
+  // Relations
+  booking   Booking  @relation(fields: [bookingId], references: [id])
+  vehicle   Vehicle  @relation(fields: [vehicleId], references: [id])
+  user      User     @relation(fields: [userId], references: [id])
+
+  @@map("reviews")
+}
+
+enum FraudAction {
+  ALLOW
+  REVIEW
+  DENY
+}
+
+model FraudFlag {
+  id        String      @id @default(cuid())
+  userId    String?
+  bookingId String?
+  score     Int
+  reasons   Json
+  action    FraudAction
+  ts        DateTime    @default(now())
+
+  // Relations
+  user      User?       @relation(fields: [userId], references: [id])
+  booking   Booking?    @relation(fields: [bookingId], references: [id])
+
+  @@map("fraud_flags")
+}
+
+enum PaymentGatewayStatus {
+  CREATED
+  PAID
+  FAILED
+  REFUNDED
+}
+
+model Payment {
+  id        String               @id @default(cuid())
+  bookingId String
+  gateway   String
+  orderId   String
+  paymentId String?
+  amount    Int
+  currency  String               @default("INR")
+  status    PaymentGatewayStatus @default(CREATED)
+  eventJson Json?
+  createdAt DateTime             @default(now())
+  updatedAt DateTime             @updatedAt
+
+  // Relations
+  booking   Booking              @relation(fields: [bookingId], references: [id])
+  refunds   Refund[]
+
+  @@map("payments")
+}
+
+enum RefundStatus {
+  CREATED
+  PROCESSED
+  FAILED
+}
+
+model Refund {
+  id        String       @id @default(cuid())
+  paymentId String
+  amount    Int
+  reason    String
+  status    RefundStatus @default(CREATED)
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
+
+  // Relations
+  payment   Payment      @relation(fields: [paymentId], references: [id])
+
+  @@map("refunds")
+}
+
+model AuditLog {
+  id       String   @id @default(cuid())
+  actorId  String
+  action   String
+  entity   String
+  entityId String
+  metaJson Json?
+  ts       DateTime @default(now())
+
+  // Relations
+  actor    User     @relation(fields: [actorId], references: [id])
+
+  @@index([entity, entityId])
+  @@index([ts])
+  @@map("audit_logs")
+}
